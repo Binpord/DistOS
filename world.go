@@ -29,44 +29,78 @@ const (
 	TimeOut
 )
 
+type Process struct {
+	node    int
+	wg      *sync.WaitGroup
+	ch      chan Message
+	workers []workFunction
+}
+
+func NewProcess(node int, wg *sync.WaitGroup) *Process {
+	p := new(Process)
+	p.node = node
+	p.wg = wg
+	p.ch = make(chan Message)
+	p.workers = make([]workFunction)
+}
+
+func (p *Process) RegisterFunction(f workFunction) {
+	p.workers = append(p.workers, f)
+}
+
+func (p *Process) Run() {
+	go func(ch <-chan Message, wg *sync.WaitGroup, workers []workFunction) {
+		defer wg.Done()
+		for msg := range ch {
+			for _, worker := range workers {
+				if worker(msg) {
+					break
+				}
+			}
+		}
+	}(p.ch, p.wg, p.workers)
+}
+
 type World struct {
 	nl         *NetworkLayer
-	wg         sync.WaitGroup
-	chs        []chan Message
+	wg         *sync.WaitGroup
+	processes  []*Process
 	associates map[string]workFunction
 }
 
 func NewWorld() *World {
 	w := new(World)
 	w.nl = NewNetworkLayer()
-	w.chs = make([]chan Message)
+	w.wg = new(sync.WaitGroup)
+	w.processes = make([]*Process)
 	w.associates = make(map[string]workFunction)
 	return w
 }
 
+func (w *World) Run() {
+	for _, process := range w.processes {
+		if process != nil {
+			w.wg.Add(1)
+			process.Run()
+		}
+	}
+}
+
 func (w *World) Wait() {
-	for i := range w.chs {
-		if w.chs[i] != nil {
-			close(w.chs[i])
+	for _, process := range w.processes {
+		if process != nil {
+			close(process.ch)
 		}
 	}
 	w.wg.Wait()
 }
 
-func (w *World) CreateProcess(node int) {
-	if node >= len(w.chs) {
-		w.chs = append(w.chs, make([]chan Message, len(w.chs)-node+1)...)
+func (w *World) CreateProcess(node int, f string) {
+	if node >= len(w.processes) {
+		w.processes = append(w.processes, make([]*Process, len(w.processes)-node+1)...)
 	}
-	w.chs[node] = make(chan Message, 10)
-
-	w.wg.Add(1)
-	go func(node int, ch chan Message) {
-		defer w.wg.Done()
-		for msg := range ch {
-		}
-	}(node, w.chs[node])
-
-	w.nl.registerProcess(node, p)
+	w.processes[node] = NewProcess(node, w.wg)
+	w.nl.RegisterProcess(node, w.processes[node])
 }
 
 func (w *World) AssignWorkFunction(node int, f string) ErrorCode {
@@ -81,7 +115,7 @@ func (w *World) AssignWorkFunction(node int, f string) ErrorCode {
 	if !ok {
 		return ItemNotFound
 	}
-	p.registerFunction(f, a)
+	p.RegisterFunction(f, a)
 	return OK
 }
 
