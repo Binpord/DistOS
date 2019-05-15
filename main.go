@@ -20,7 +20,10 @@ func workFunction_ATTN(m *world.Message, p *world.Process, w *world.World) bool 
 			new_m.Append(world.NewMessageArg(arg))
 			w.nl.messages <- new_m
 		}
+	} else if s == "ATTN_ATTN" {
+		arg := m.GetInt32()
 	}
+	return true
 }
 
 func main() {
